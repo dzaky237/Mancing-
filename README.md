@@ -37,3 +37,10 @@ Tujuan dibuat:
 jangan manja kalau mau fitur lebih pasang sendiri 🗿 
 
 jangan lupa ini compile pake pyinstaller kalau males install py to exe kalau mau lebih shealty pake nuitka atau cython tapi jarang berharap gue buat c++ repot soalnya ribet
+
+
+
+
+
+
+ohya note tanggal 11 ini error cok maaf ini tools gue buat gagal error gue perbarui dulu ini sementara gue ganti pake c2 pribadi yang udah gue gak pake 😅
